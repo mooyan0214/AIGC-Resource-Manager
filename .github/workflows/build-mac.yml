@@ -29,7 +29,17 @@ jobs:
         run: npm run build
 
       - name: Build DMG
-        run: npx electron-builder --mac dmg --x64 --config electron-builder.json5
+        run: |
+          set -o pipefail
+          mkdir -p action-logs
+          DEBUG=electron-builder npx electron-builder --mac dmg --x64 --config electron-builder.json5 2>&1 | tee action-logs/build-dmg.log
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build-logs
+          path: action-logs/*.log
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
