@@ -32,7 +32,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p action-logs
-          DEBUG=electron-builder npx electron-builder --mac dmg --x64 --config electron-builder.json5 2>&1 | tee action-logs/build-dmg.log
+          DEBUG=electron-builder npx electron-builder --mac dmg --x64 --publish never --config electron-builder.json5 2>&1 | tee action-logs/build-dmg.log
 
       - name: Upload build logs
         if: always()
