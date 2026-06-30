@@ -41,6 +41,18 @@ jobs:
           name: mac-build-logs
           path: action-logs/*.log
 
+      - name: Publish build log summary
+        if: always()
+        run: |
+          if [ -f action-logs/build-dmg.log ]; then
+            {
+              echo "## Build DMG log tail"
+              echo '```text'
+              tail -n 160 action-logs/build-dmg.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
