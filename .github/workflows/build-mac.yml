@@ -8,7 +8,9 @@ on:
 
 jobs:
   build-mac:
-    runs-on: macos-latest
+    runs-on: macos-15
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
 
     steps:
       - name: Checkout
@@ -27,7 +29,7 @@ jobs:
         run: npm run build
 
       - name: Build DMG
-        run: npx electron-builder --mac dmg --config electron-builder.json5
+        run: npx electron-builder --mac dmg --x64 --config electron-builder.json5
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
