@@ -1,10 +1,11 @@
-const { contextBridge, ipcRenderer } = require('electron')
+﻿const { contextBridge, ipcRenderer } = require('electron')
 
 const resourceApi = {
   selectDirectory: () => ipcRenderer.invoke('models:selectDirectory'),
   scanDirectory: modelsRoot => ipcRenderer.invoke('models:scanDirectory', modelsRoot),
   load: () => ipcRenderer.invoke('resources:load'),
   save: data => ipcRenderer.invoke('resources:save', data),
+  fetchBilibiliInfo: payload => ipcRenderer.invoke('bilibili:fetchInfo', payload),
   scanGalleryDirectory: galleryRoot => ipcRenderer.invoke('gallery:scanDirectory', galleryRoot),
   copyImage: imagePath => ipcRenderer.invoke('gallery:copyImage', imagePath),
   deleteImage: imagePath => ipcRenderer.invoke('gallery:deleteImage', imagePath),
@@ -25,3 +26,4 @@ contextBridge.exposeInMainWorld('localModels', resourceApi)
 contextBridge.exposeInMainWorld('resourceApi', resourceApi)
 
 console.log('[preload] Electron preload loaded')
+

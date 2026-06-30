@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, screen, shell } from 'electron'
+﻿import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, screen, shell } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -31,13 +31,16 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 let win: BrowserWindow | null
+const APP_STORAGE_DIR_NAME = 'AIGC-Resource-Manager'
+
+function getStorageRootDirectory() {
+  return app.isPackaged
+    ? path.join(app.getPath('appData'), APP_STORAGE_DIR_NAME)
+    : path.join(app.getAppPath(), APP_STORAGE_DIR_NAME)
+}
 
 function getDataDirectory() {
-  if (app.isPackaged) {
-    return path.join(path.dirname(app.getPath('exe')), 'data')
-  }
-
-  return path.join(app.getAppPath(), 'data')
+  return path.join(getStorageRootDirectory(), 'data')
 }
 
 function getResourcesFilePath() {
@@ -49,11 +52,7 @@ async function ensureDataDirectory() {
 }
 
 function getCacheDirectory() {
-  if (app.isPackaged) {
-    return path.join(path.dirname(app.getPath('exe')), 'cache')
-  }
-
-  return path.join(app.getAppPath(), 'cache')
+  return path.join(getStorageRootDirectory(), 'cache')
 }
 
 async function ensureCacheDirectory() {
@@ -383,6 +382,53 @@ function registerResourceStorageHandlers() {
   })
 }
 
+function getBilibiliVideoQuery(input: string) {
+  const cleanInput = String(input || '').trim()
+  const bvMatch = cleanInput.match(/BV[a-zA-Z0-9]+/)
+  if (bvMatch) {
+    return `bvid=${encodeURIComponent(bvMatch[0])}`
+  }
+  const avMatch = cleanInput.match(/av(\d+)/i)
+  if (avMatch?.[1]) {
+    return `aid=${encodeURIComponent(avMatch[1])}`
+  }
+  return ''
+}
+function registerBilibiliHandlers() {
+  ipcMain.handle('bilibili:fetchInfo', async (_event, payload: { url?: string }) => {
+    const query = getBilibiliVideoQuery(payload?.url || '')
+    if (!query) {
+      throw new Error('没有识别到 BV 号或 AV 号')
+    }
+    const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${query}`, {
+      headers: {
+        Referer: 'https://www.bilibili.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`获取视频信息失败：HTTP ${response.status}`)
+    }
+    const result = (await response.json()) as {
+      code?: number
+      message?: string
+      data?: {
+        title?: string
+        owner?: {
+          name?: string
+        }
+      }
+    }
+    if (result.code !== 0 || !result.data) {
+      throw new Error(result.message || '获取视频信息失败')
+    }
+    return {
+      title: result.data.title || '',
+      author: result.data.owner?.name || '',
+    }
+  })
+}
 function registerGalleryHandlers() {
   ipcMain.handle('gallery:scanDirectory', async (_event, galleryRoot: string) => {
     const cleanPath = String(galleryRoot || '').trim()
@@ -708,9 +754,11 @@ app.on('activate', () => {
 app.whenReady().then(() => {
   registerModelIpcHandlers()
   registerResourceStorageHandlers()
+  registerBilibiliHandlers()
   registerGalleryHandlers()
   registerFeedbackHandlers()
   registerDialogHandlers()
   Menu.setApplicationMenu(null)
   createWindow()
 })
+

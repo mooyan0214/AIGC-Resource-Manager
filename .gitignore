@@ -11,9 +11,11 @@ node_modules
 dist
 dist-electron
 dist-ssr
+release
 *.local
 cache
 data
+AIGC-Resource-Manager
 desktop-restart.log
 desktop-run.err.log
 desktop-run.log
@@ -21,6 +23,9 @@ vite-run.err.log
 vite-run.log
 __snapshot_compare
 *.zip
+app-fix.patch
+src/App - 副本 (2).tsx
+src/新建 文本文档.txt
 
 # Editor directories and files
 .vscode/*

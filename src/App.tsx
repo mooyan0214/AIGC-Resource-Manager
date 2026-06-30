@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import './App.css'
 
 type ResourceNode = {
@@ -55,11 +55,16 @@ type PersistedAppData = {
   topics?: Topic[]
   galleryPath?: string
 }
+type BilibiliVideoInfo = {
+  title: string
+  author: string
+}
 
 type DesktopResourceApi = {
   selectDirectory?: () => Promise<string | null>
   scanDirectory?: (path: string) => Promise<ResourceNode[] | ScannedResourceItem[]>
   load?: () => Promise<PersistedAppData | null>
+  fetchBilibiliInfo?: (payload: { url: string }) => Promise<BilibiliVideoInfo>
   save?: (data: {
     tutorials: Tutorial[]
     topics: Topic[]
@@ -134,7 +139,10 @@ const showNoticeAlert = (message: string) => runWithDialogTitle('通知', () => 
 
 const showNoticeConfirm = (message: string) => runWithDialogTitle('通知', () => window.confirm(message))
 
-const defaultTopics: Topic[] = [{ id: 'basics', name: '入门基础', description: 'AI绘画 基础使用与安装' }]
+const defaultTopics: Topic[] = [{ id: 'basics', name: '文生图', description: 'Z-image' }]
+const TOPIC_NAME_MAX_LENGTH = 12
+const COMPARE_DEFAULT_ZOOM = 1
+const isLikelyUrl = (value: string) => /^(https?:\/\/|www\.)/i.test(value.trim())
 
 const getBilibiliVideoKey = (input: string) => {
   const cleanInput = input.trim()
@@ -155,18 +163,7 @@ const getBilibiliVideoKey = (input: string) => {
 
 const isSupportedImagePath = (path: string) => /\.(png|jpe?g|webp|bmp|gif)$/i.test(path)
 
-const initialTutorials: Tutorial[] = [
-  {
-    id: 'tutorial-1',
-    title: 'AI绘画 基础工作流入门',
-    author: '示例 UP 主',
-    url: 'https://www.bilibili.com/video/BVxxxx',
-    topicId: 'basics',
-    tags: ['Checkpoint', 'VAE', '工作流'],
-    resourcePath: '',
-    resources: [],
-  },
-]
+const initialTutorials: Tutorial[] = []
 
 const createEmptyResources = (): ResourceNode[] => []
 
@@ -366,6 +363,44 @@ const isResourceNodeArray = (
   items: ResourceNode[] | ScannedResourceItem[],
 ): items is ResourceNode[] => items.every((item) => 'children' in item || item.type === 'file')
 
+const getResourceFileIcon = (fileName: string) => {
+  const ext = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase() : ''
+
+  if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(ext)) {
+    return '🗜️'
+  }
+
+  if (['.json', '.yaml', '.yml', '.toml', '.ini', '.txt', '.md'].includes(ext)) {
+    return '📝'
+  }
+
+  if (['.doc', '.docx', '.pdf'].includes(ext)) {
+    return '📘'
+  }
+
+  if (['.xls', '.xlsx', '.csv'].includes(ext)) {
+    return '📊'
+  }
+
+  if (['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'].includes(ext)) {
+    return '🖼️'
+  }
+
+  if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext)) {
+    return '🎬'
+  }
+
+  if (['.mp3', '.wav', '.flac', '.aac', '.ogg'].includes(ext)) {
+    return '🎵'
+  }
+
+  if (['.safetensors', '.ckpt', '.pt', '.pth', '.bin'].includes(ext)) {
+    return '🧠'
+  }
+
+  return '📄'
+}
+
 const selectDirectoryByDesktopApi = async () => {
   if (window.localModels?.selectDirectory) {
     return window.localModels.selectDirectory()
@@ -380,7 +415,7 @@ const selectDirectoryByDesktopApi = async () => {
   if (tauriInvoke) {
     return tauriInvoke<string | null>('select_directory')
   }
-  throw new Error('褰撳墠妗岄潰绔病鏈夋毚闇查€夋嫨鐩綍鎺ュ彛')
+  throw new Error('当前桌面端没有暴露选择目录接口')
 }
 
 const loadResourcesByDesktopApi = async () => {
@@ -405,6 +440,18 @@ const saveAppDataByDesktopApi = async (
     return window.localModels.save({ tutorials, topics, galleryPath })
   }
   return null
+}
+const fetchBilibiliInfoByDesktopApi = async (url: string) => {
+  if (window.resourceApi?.fetchBilibiliInfo) {
+    return window.resourceApi.fetchBilibiliInfo({ url })
+  }
+  if (window.localModels?.fetchBilibiliInfo) {
+    return window.localModels.fetchBilibiliInfo({ url })
+  }
+  if (window.electronAPI?.fetchBilibiliInfo) {
+    return window.electronAPI.fetchBilibiliInfo({ url })
+  }
+  throw new Error('当前桌面端没有暴露 B 站信息获取接口')
 }
 
 const scanDirectoryByDesktopApi = async (path: string) => {
@@ -683,7 +730,9 @@ const ResourceTree = ({
               <span className={`folder-chevron ${isExpanded ? 'expanded' : ''}`}>
                 {isFolder && hasChildren ? '›' : ''}
               </span>
-              <span className="resource-icon">{isFolder ? (isExpanded ? '📂' : '📁') : '📄'}</span>
+              <span className={`resource-icon ${isFolder ? 'folder' : 'file'}`}>
+                {isFolder ? (isExpanded ? '📂' : '📁') : getResourceFileIcon(node.name)}
+              </span>
 
               <div className="resource-node-main">
                 <strong>{node.name}</strong>
@@ -726,7 +775,7 @@ function App() {
   const [topics, setTopics] = useState<Topic[]>(defaultTopics)
   const [tutorials, setTutorials] = useState<Tutorial[]>(initialTutorials)
   const [selectedTopicId, setSelectedTopicId] = useState(defaultTopics[0].id)
-  const [selectedTutorialId, setSelectedTutorialId] = useState<string | null>(initialTutorials[0].id)
+  const [selectedTutorialId, setSelectedTutorialId] = useState<string | null>(initialTutorials[0]?.id || null)
   const [searchKeyword, setSearchKeyword] = useState('')
 
   const [showAddModal, setShowAddModal] = useState(false)
@@ -776,7 +825,7 @@ function App() {
   const [selectedGalleryImageIds, setSelectedGalleryImageIds] = useState<string[]>([])
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
   const [isGalleryCompareOpen, setIsGalleryCompareOpen] = useState(false)
-  const [compareZoom, setCompareZoom] = useState(1)
+  const [compareZoom, setCompareZoom] = useState(COMPARE_DEFAULT_ZOOM)
   const [compareOffset, setCompareOffset] = useState({ x: 0, y: 0 })
   const [isCompareDragging, setIsCompareDragging] = useState(false)
   const [compareDragStart, setCompareDragStart] = useState({ x: 0, y: 0 })
@@ -898,7 +947,7 @@ function App() {
 
   useEffect(() => {
     if (!isGalleryCompareOpen) {
-      setCompareZoom(1)
+      setCompareZoom(COMPARE_DEFAULT_ZOOM)
       setCompareOffset({ x: 0, y: 0 })
       setIsCompareDragging(false)
     }
@@ -1127,7 +1176,7 @@ function App() {
     setOpenTopicMenuId(null)
   }
 
-  const mockFetchBilibiliInfo = async () => {
+  const fetchBilibiliInfo = async () => {
     const inputUrl = url.trim()
 
     if (!inputUrl) {
@@ -1135,36 +1184,25 @@ function App() {
       return
     }
 
-    const bvMatch = inputUrl.match(/BV[a-zA-Z0-9]+/)
-    const avMatch = inputUrl.match(/av(\d+)/i)
-
-    if (!bvMatch && !avMatch) {
+    if (!getBilibiliVideoKey(inputUrl)) {
       setVideoInfoError('没有识别到 BV 号或 AV 号，请检查链接')
       return
     }
-
-    const query = bvMatch ? `bvid=${bvMatch[0]}` : `aid=${avMatch?.[1]}`
 
     try {
       setIsFetchingVideoInfo(true)
       setVideoInfoError('')
 
-      const response = await fetch(`/bilibili-api/x/web-interface/view?${query}`)
+      const result = await fetchBilibiliInfoByDesktopApi(inputUrl)
 
-      if (!response.ok) {
-        throw new Error('请求失败')
+      if (!result.title) {
+        throw new Error('没有获取到视频标题')
       }
 
-      const result = await response.json()
-
-      if (result.code !== 0 || !result.data) {
-        throw new Error(result.message || '获取视频信息失败')
-      }
-
-      setTitle(result.data.title || '')
-      setAuthor(result.data.owner?.name || '')
-    } catch {
-      setVideoInfoError('获取失败，请确认链接正确，或稍后再试')
+      setTitle(result.title)
+      setAuthor(result.author || '未知 UP 主')
+    } catch (error) {
+      setVideoInfoError(error instanceof Error ? error.message : '获取失败，请确认链接正确，或稍后再试')
     } finally {
       setIsFetchingVideoInfo(false)
     }
@@ -1231,7 +1269,7 @@ function App() {
       url: url.trim(),
       topicId: safeTopicId,
       tags: tags
-        .split(/[锛?]/)
+        .split(/[,，]/)
         .map((tag) => tag.trim())
         .filter(Boolean),
     }
@@ -1343,6 +1381,16 @@ function App() {
       return
     }
 
+    if (isLikelyUrl(cleanName)) {
+      setTopicError('主题名称不能填写链接，请输入简短名称，例如：文生图')
+      return
+    }
+
+    if (cleanName.length > TOPIC_NAME_MAX_LENGTH) {
+      setTopicError(`主题名称最多 ${TOPIC_NAME_MAX_LENGTH} 个字符`)
+      return
+    }
+
     if (editingTopicId) {
       setTopics((current) =>
         current.map((topic) =>
@@ -1350,7 +1398,7 @@ function App() {
             ? {
                 ...topic,
                 name: cleanName,
-                description: cleanDescription || '自定义教程主题',
+                description: cleanDescription,
               }
             : topic,
         ),
@@ -1362,7 +1410,7 @@ function App() {
     const nextTopic: Topic = {
       id: crypto.randomUUID(),
       name: cleanName,
-      description: cleanDescription || '自定义教程主题',
+      description: cleanDescription,
     }
 
     setTopics((current) => [...current, nextTopic])
@@ -1700,7 +1748,7 @@ function App() {
     }
   }
 
-  const importDroppedGalleryImages = async (event: React.DragEvent<HTMLDivElement>) => {
+  const importDroppedGalleryImages = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
 
     const cleanPath = (galleryCurrentPath || galleryPath).trim()
@@ -1882,7 +1930,9 @@ function App() {
     <main className={`app-shell ${themeMode === 'light' ? 'light-mode' : 'dark-mode'}`}>
       <aside className="side-nav">
         <div className="brand">
-          <div className="brand-logo">AIGC</div>
+          <div className="brand-logo">
+            <img src="/brand-logo.png" alt="AI绘画资源管理" />
+          </div>
           <div>
             <strong>AI绘画资源管理</strong>
             <span>
@@ -1951,6 +2001,7 @@ function App() {
                           ? 'active'
                           : ''
                       }`}
+                      title={topic.description ? `${topic.name}\n${topic.description}` : topic.name}
                       onClick={() => toggleTopic(topic.id)}
                     >
                       <span className="topic-button-copy">
@@ -2099,6 +2150,10 @@ function App() {
 
               {galleryError && <p className="form-error gallery-error">{galleryError}</p>}
 
+              {visibleGalleryImages.length > 0 ? (
+                <div className="gallery-grid-summary">共 {visibleGalleryImages.length} 个</div>
+              ) : null}
+
               <div
                 className="tutorial-scroll-area gallery-scroll-area"
                 onDragOver={(event) => event.preventDefault()}
@@ -2106,8 +2161,6 @@ function App() {
               >
                 {visibleGalleryImages.length > 0 ? (
                   <>
-                    <div className="gallery-grid-summary">共 {visibleGalleryImages.length} 个</div>
-
                     <div className={`gallery-grid ${isMultiSelectMode ? 'multi-select' : ''}`}>
                       {visibleGalleryImages.map((image) => (
                         <button
@@ -2437,7 +2490,7 @@ function App() {
                   onChange={(event) => setUrl(event.target.value)}
                   placeholder="粘贴 B 站视频链接"
                 />
-                <button type="button" onClick={mockFetchBilibiliInfo} disabled={isFetchingVideoInfo}>
+                <button type="button" onClick={fetchBilibiliInfo} disabled={isFetchingVideoInfo}>
                   {isFetchingVideoInfo ? '获取中...' : '获取信息'}
                 </button>
               </div>
@@ -2514,6 +2567,7 @@ function App() {
               <input
                 value={topicName}
                 onChange={(event) => setTopicName(event.target.value)}
+                maxLength={TOPIC_NAME_MAX_LENGTH}
                 placeholder="例如：人像写真"
               />
             </label>
@@ -2710,8 +2764,32 @@ function App() {
                 event.preventDefault()
                 setGalleryZoom((current) => {
                   const nextZoom = event.deltaY < 0 ? current + 0.12 : current - 0.12
-                  return Math.min(4, Math.max(0.5, Number(nextZoom.toFixed(2))))
+                  const boundedZoom = Math.min(4, Math.max(0.5, Number(nextZoom.toFixed(2))))
+
+                  if (boundedZoom < current) {
+                    setGalleryPreviewOffset((offset) => {
+                      if (boundedZoom <= 1.01 || current <= 1.01) {
+                        return { x: 0, y: 0 }
+                      }
+
+                      const shrinkRatio = Math.max(0, (boundedZoom - 1) / (current - 1))
+                      return {
+                        x: Math.round(offset.x * shrinkRatio),
+                        y: Math.round(offset.y * shrinkRatio),
+                      }
+                    })
+                  }
+
+                  return boundedZoom
                 })
+              }}
+              onMouseDown={(event) => {
+                if (galleryZoom <= 1.01) {
+                  return
+                }
+
+                setIsGalleryPreviewDragging(true)
+                setGalleryPreviewDragStart({ x: event.clientX, y: event.clientY })
               }}
               onMouseMove={(event) => {
                 if (!isGalleryPreviewDragging) {
@@ -2727,24 +2805,23 @@ function App() {
               onMouseUp={() => setIsGalleryPreviewDragging(false)}
               onMouseLeave={() => setIsGalleryPreviewDragging(false)}
             >
-              <img
-                src={selectedGalleryImage.imageUrl || selectedGalleryImage.thumbnailUrl}
-                alt={selectedGalleryImage.name}
-                draggable={false}
-                onDragStart={(event) => event.preventDefault()}
+              <div
+                className="gallery-transform-stage"
                 style={{
-                  transform: `translate(${galleryPreviewOffset.x}px, ${galleryPreviewOffset.y}px) scale(${galleryZoom})`,
-                  transformOrigin: 'center center',
+                  transform: `translate(-50%, -50%) translate(${galleryPreviewOffset.x}px, ${galleryPreviewOffset.y}px)`,
                 }}
-                onMouseDown={(event) => {
-                  if (galleryZoom <= 1) {
-                    return
-                  }
-
-                  setIsGalleryPreviewDragging(true)
-                  setGalleryPreviewDragStart({ x: event.clientX, y: event.clientY })
-                }}
-              />
+              >
+                <img
+                  src={selectedGalleryImage.imageUrl || selectedGalleryImage.thumbnailUrl}
+                  alt={selectedGalleryImage.name}
+                  draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
+                  style={{
+                    transform: `scale(${galleryZoom})`,
+                    transformOrigin: 'center center',
+                  }}
+                />
+              </div>
             </div>
             <div className="gallery-lightbox-actions">
               <button type="button" className="ghost-button" onClick={revealCurrentGalleryImage}>
@@ -2785,6 +2862,18 @@ function App() {
 
             <div
               className={`gallery-compare-grid compare-count-${comparedGalleryImages.length}`}
+              onMouseDown={(event) => {
+                if (
+                  compareZoom <= 1.01 ||
+                  event.target instanceof Element &&
+                    (event.target.closest('.gallery-compare-card-header') || event.target.closest('button'))
+                ) {
+                  return
+                }
+
+                setIsCompareDragging(true)
+                setCompareDragStart({ x: event.clientX, y: event.clientY })
+              }}
               onMouseMove={(event) => {
                 if (!isCompareDragging) {
                   return
@@ -2820,12 +2909,28 @@ function App() {
                     onWheel={(event) => {
                       event.preventDefault()
                       setCompareZoom((current) => {
-                        const nextZoom = event.deltaY < 0 ? current + 0.12 : current - 0.12
-                        return Math.min(4, Math.max(0.5, Number(nextZoom.toFixed(2))))
+                        const nextZoom = event.deltaY < 0 ? current + 0.18 : current - 0.18
+                        const boundedZoom = Math.min(6, Math.max(0.75, Number(nextZoom.toFixed(2))))
+
+                        if (boundedZoom < current) {
+                          setCompareOffset((offset) => {
+                            if (boundedZoom <= 1.01 || current <= 1.01) {
+                              return { x: 0, y: 0 }
+                            }
+
+                            const shrinkRatio = Math.max(0, (boundedZoom - 1) / (current - 1))
+                            return {
+                              x: Math.round(offset.x * shrinkRatio),
+                              y: Math.round(offset.y * shrinkRatio),
+                            }
+                          })
+                        }
+
+                        return boundedZoom
                       })
                     }}
                     onMouseDown={(event) => {
-                      if (compareZoom <= 1) {
+                      if (compareZoom <= 1.01) {
                         return
                       }
 
@@ -2862,4 +2967,3 @@ function App() {
 }
 
 export default App
-

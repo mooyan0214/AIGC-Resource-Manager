@@ -8,13 +8,16 @@ const FEEDBACK_WEBHOOK_URL =
   'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=bd0a28ce-4372-4c03-b376-bc180611b40d'
 
 const isDev = !app.isPackaged
+const APP_STORAGE_DIR_NAME = 'AIGC-Resource-Manager'
+
+function getStorageRootDirectory() {
+  return app.isPackaged
+    ? path.join(app.getPath('appData'), APP_STORAGE_DIR_NAME)
+    : path.join(app.getAppPath(), APP_STORAGE_DIR_NAME)
+}
 
 function getDataDirectory() {
-  if (app.isPackaged) {
-    return path.join(path.dirname(app.getPath('exe')), 'data')
-  }
-
-  return path.join(app.getAppPath(), 'data')
+  return path.join(getStorageRootDirectory(), 'data')
 }
 
 function getResourcesFilePath() {
@@ -26,11 +29,7 @@ async function ensureDataDirectory() {
 }
 
 function getCacheDirectory() {
-  if (app.isPackaged) {
-    return path.join(path.dirname(app.getPath('exe')), 'cache')
-  }
-
-  return path.join(app.getAppPath(), 'cache')
+  return path.join(getStorageRootDirectory(), 'cache')
 }
 
 async function ensureCacheDirectory() {
@@ -317,7 +316,7 @@ async function collectGalleryImages(directoryPath) {
 function registerModelIpcHandlers() {
   ipcMain.handle('models:selectDirectory', async () => {
     const result = await dialog.showOpenDialog({
-      title: '閫夋嫨璧勬簮鐩綍',
+      title: '选择资源目录',
       properties: ['openDirectory'],
     })
 
@@ -332,7 +331,7 @@ function registerModelIpcHandlers() {
     const cleanPath = String(modelsRoot || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鐩綍璺緞涓嶈兘涓虹┖')
+      throw new Error('目录路径不能为空')
     }
 
     const tree = await scanDirectoryTree(cleanPath)
@@ -367,18 +366,56 @@ function registerResourceStorageHandlers() {
   })
 }
 
+function getBilibiliVideoQuery(input) {
+  const cleanInput = String(input || '').trim()
+  const bvMatch = cleanInput.match(/BV[a-zA-Z0-9]+/)
+  if (bvMatch) {
+    return `bvid=${encodeURIComponent(bvMatch[0])}`
+  }
+  const avMatch = cleanInput.match(/av(\d+)/i)
+  if (avMatch?.[1]) {
+    return `aid=${encodeURIComponent(avMatch[1])}`
+  }
+  return ''
+}
+function registerBilibiliHandlers() {
+  ipcMain.handle('bilibili:fetchInfo', async (_event, payload) => {
+    const query = getBilibiliVideoQuery(payload?.url || '')
+    if (!query) {
+      throw new Error('没有识别到 BV 号或 AV 号')
+    }
+    const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${query}`, {
+      headers: {
+        Referer: 'https://www.bilibili.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`获取视频信息失败：HTTP ${response.status}`)
+    }
+    const result = await response.json()
+    if (result.code !== 0 || !result.data) {
+      throw new Error(result.message || '获取视频信息失败')
+    }
+    return {
+      title: result.data.title || '',
+      author: result.data.owner?.name || '',
+    }
+  })
+}
 function registerGalleryHandlers() {
   ipcMain.handle('gallery:scanDirectory', async (_event, galleryRoot) => {
     const cleanPath = String(galleryRoot || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鍥剧墖鐩綍涓嶈兘涓虹┖')
+      throw new Error('图片目录不能为空')
     }
 
     const stat = await fs.stat(cleanPath)
 
     if (!stat.isDirectory()) {
-      throw new Error('閫夋嫨鐨勮矾寰勪笉鏄枃浠跺す')
+      throw new Error('选择的路径不是文件夹')
     }
 
     return collectGalleryImages(cleanPath)
@@ -388,7 +425,7 @@ function registerGalleryHandlers() {
     const cleanPath = String(imagePath || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鍥剧墖璺緞涓嶈兘涓虹┖')
+      throw new Error('图片路径不能为空')
     }
 
     const image = nativeImage.createFromPath(cleanPath)
@@ -406,7 +443,7 @@ function registerGalleryHandlers() {
     const cleanPath = String(imagePath || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鍥剧墖璺緞涓嶈兘涓虹┖')
+      throw new Error('图片路径不能为空')
     }
 
     await shell.trashItem(cleanPath)
@@ -425,7 +462,7 @@ function registerGalleryHandlers() {
     const paths = Array.isArray(payload?.paths) ? payload.paths.map((item) => String(item || '').trim()).filter(Boolean) : []
 
     if (!targetDirectory) {
-      throw new Error('鐩爣鐩綍涓嶈兘涓虹┖')
+      throw new Error('目标目录不能为空')
     }
 
     await fs.mkdir(targetDirectory, { recursive: true })
@@ -442,7 +479,7 @@ function registerGalleryHandlers() {
     const paths = Array.isArray(payload?.paths) ? payload.paths.map((item) => String(item || '').trim()).filter(Boolean) : []
 
     if (!targetDirectory) {
-      throw new Error('鐩爣鐩綍涓嶈兘涓虹┖')
+      throw new Error('目标目录不能为空')
     }
 
     await fs.mkdir(targetDirectory, { recursive: true })
@@ -458,7 +495,7 @@ function registerGalleryHandlers() {
     const cleanPath = String(galleryPath || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鍥剧墖鐩綍涓嶈兘涓虹┖')
+      throw new Error('图片目录不能为空')
     }
 
     const errorMessage = await shell.openPath(cleanPath)
@@ -474,7 +511,7 @@ function registerGalleryHandlers() {
     const cleanPath = String(itemPath || '').trim()
 
     if (!cleanPath) {
-      throw new Error('鍥剧墖璺緞涓嶈兘涓虹┖')
+      throw new Error('图片路径不能为空')
     }
 
     shell.showItemInFolder(cleanPath)
@@ -508,7 +545,7 @@ function registerGalleryHandlers() {
     const paths = Array.isArray(payload?.paths) ? payload.paths.map((item) => String(item || '').trim()).filter(Boolean) : []
 
     if (!targetDirectory) {
-      throw new Error('鍥剧墖鐩綍涓嶈兘涓虹┖')
+      throw new Error('图片目录不能为空')
     }
 
     await fs.mkdir(targetDirectory, { recursive: true })
@@ -616,7 +653,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     center: true,
-    title: 'ComfyUI鏁欑▼璧勬簮绠＄悊',
+    title: 'AI绘画教程资源管理',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -647,6 +684,7 @@ function createWindow() {
 app.whenReady().then(() => {
   registerModelIpcHandlers()
   registerResourceStorageHandlers()
+  registerBilibiliHandlers()
   registerGalleryHandlers()
   registerFeedbackHandlers()
   registerDialogHandlers()
@@ -665,4 +703,5 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
 

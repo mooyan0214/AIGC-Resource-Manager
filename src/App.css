@@ -3,15 +3,15 @@
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #0b0f14;
-  color: #f4f0e8;
+  background: #edf3fb;
+  color: #182741;
   font-family:
     Inter,
     ui-sans-serif,
@@ -144,21 +144,25 @@ button {
   display: grid;
   width: 52px;
   height: 52px;
+  flex: 0 0 52px;
   place-items: center;
-  border: 1px solid rgba(147, 168, 232, 0.24);
-  border-radius: 14px;
-  background: linear-gradient(145deg, #5c73b5, #334361);
-  color: #f7f2ea;
-  font-size: 16px;
-  font-weight: 900;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 14px 28px rgba(0, 0, 0, 0.28);
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.brand-logo img {
+  display: block;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
 }
 
 .app-shell.light-mode .brand-logo {
-  border-color: rgba(95, 120, 191, 0.22);
-  background: linear-gradient(145deg, #6b83c5, #4d628f);
-  color: #fffdf8;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 12px 28px rgba(81, 101, 147, 0.16);
+  background: transparent;
+  box-shadow: none;
 }
 
 .brand {
@@ -240,6 +244,8 @@ button {
 .topic-button {
   display: flex;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -247,12 +253,16 @@ button {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
+  overflow: hidden;
   padding: 14px;
   text-align: left;
 }
 
 .topic-button-copy {
+  display: block;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding-right: 42px;
 }
 
@@ -268,18 +278,34 @@ button {
 }
 
 .topic-button strong {
-  display: block;
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   margin-bottom: 5px;
   font-size: 15px;
   font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .topic-button small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.topic-group,
 .topic-card {
+  max-width: 100%;
+  min-width: 0;
   position: relative;
 }
 
@@ -762,7 +788,7 @@ h4 {
   margin-bottom: 12px;
   color: var(--text-muted);
   font-size: 13px;
-  text-align: right;
+  text-align: left;
 }
 
 .gallery-grid {
@@ -934,10 +960,12 @@ h4 {
 }
 
 .gallery-lightbox {
-  width: 80vw;
-  height: 80vh;
-  max-width: 80vw;
-  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 1680px);
+  height: 88vh;
+  max-width: 92vw;
+  max-height: 88vh;
   border: 1px solid var(--border);
   background: var(--panel-bg);
   padding: 14px;
@@ -989,8 +1017,20 @@ h4 {
   will-change: transform;
 }
 
+.gallery-compare-canvas .gallery-transform-stage {
+  width: 100%;
+  height: 100%;
+}
+
+.gallery-lightbox-body .gallery-transform-stage {
+  width: 100%;
+  height: 100%;
+}
+
 .gallery-lightbox-body img {
   display: block;
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: calc(80vh - 144px);
   object-fit: contain;
@@ -1009,7 +1049,7 @@ h4 {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding-top: 12px;
+  padding-top: 20px;
 }
 
 .gallery-prompt-panel {
@@ -1090,6 +1130,10 @@ h4 {
 .gallery-compare-lightbox {
   display: flex;
   flex-direction: column;
+  width: min(96vw, 1880px);
+  height: 92vh;
+  max-width: 96vw;
+  max-height: 92vh;
 }
 
 .gallery-compare-toolbar {
@@ -1106,7 +1150,7 @@ h4 {
   display: grid;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 12px;
+  gap: 10px;
 }
 
 .gallery-compare-grid.compare-count-2 {
@@ -1132,7 +1176,7 @@ h4 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1181,6 +1225,8 @@ h4 {
 
 .gallery-compare-canvas img {
   display: block;
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -1262,13 +1308,36 @@ h4 {
 .tutorial-card-tools {
   position: absolute;
   right: 14px;
-  bottom: 12px;
+  bottom: 8px;
   z-index: 6;
   opacity: 0;
   pointer-events: none;
   transition:
     opacity 0.18s ease,
     transform 0.18s ease;
+}
+
+.tutorial-card-tools .topic-menu-trigger {
+  display: grid;
+  width: 38px;
+  height: 28px;
+  place-items: center;
+  border-radius: 10px;
+}
+
+.tutorial-card-tools .topic-menu-dots {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 18px;
+  height: 100%;
+}
+
+.tutorial-card-tools .topic-menu-dots span {
+  width: 4px;
+  height: 4px;
 }
 
 .tutorial-card-tools .topic-menu {
@@ -1781,6 +1850,15 @@ textarea:focus {
   font-size: 18px;
 }
 
+.resource-icon.file {
+  background: rgba(108, 132, 199, 0.08);
+  font-size: 17px;
+}
+
+.resource-icon.folder {
+  background: rgba(108, 132, 199, 0.1);
+}
+
 .resource-node-main {
   min-width: 0;
 }
@@ -2142,6 +2220,10 @@ html {
 
 .app-shell.light-mode .resource-icon {
   background: rgba(108, 132, 199, 0.1);
+}
+
+.app-shell.light-mode .resource-icon.file {
+  background: rgba(108, 132, 199, 0.08);
 }
 
 .app-shell.light-mode .resource-node-main strong {
