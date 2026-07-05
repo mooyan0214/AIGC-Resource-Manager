@@ -2,6 +2,10 @@
 import type { CSSProperties, DragEvent } from 'react'
 import './App.css'
 
+const BRAND_LOGO_URL = `${import.meta.env.BASE_URL}brand-logo.png`
+const GALLERY_PROMPT_READER_VERSION = 'output-positive-v4'
+const GALLERY_GENERATION_INFO_READER_VERSION = 'generation-v1'
+
 type ResourceNode = {
   id: string
   name: string
@@ -45,9 +49,35 @@ type GalleryImage = {
   imageUrl?: string
   thumbnailUrl?: string
   prompt?: string
+  promptSourceKey?: string
+  generationInfo?: GalleryGenerationInfo
+  generationInfoSourceKey?: string
   size?: number
   modifiedAt?: string
   modifiedTimestamp?: number
+}
+
+type GalleryGenerationLora = {
+  name: string
+  strengthModel?: number
+  strengthClip?: number
+}
+
+type GalleryGenerationParams = {
+  seed?: string | number
+  steps?: string | number
+  cfg?: string | number
+  sampler?: string
+  scheduler?: string
+  denoise?: string | number
+}
+
+type GalleryGenerationInfo = {
+  model?: string
+  clip?: string
+  vae?: string
+  loras: GalleryGenerationLora[]
+  params?: GalleryGenerationParams
 }
 
 type PersistedAppData = {
@@ -89,6 +119,7 @@ type DesktopResourceApi = {
     paths?: string[]
   }) => Promise<{ success: boolean; importedCount?: number; duplicateNames?: string[] }>
   readGalleryPrompt?: (path: string) => Promise<{ prompt: string }>
+  readGalleryGenerationInfo?: (path: string) => Promise<{ generationInfo: GalleryGenerationInfo }>
   readGalleryImage?: (path: string) => Promise<{ imageUrl: string }>
   submitFeedback?: (payload: { content?: string; page?: string }) => Promise<{ success: boolean }>
   showConfirmDialog?: (payload: {
@@ -208,6 +239,27 @@ const formatFileSize = (size?: number) => {
 
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
+
+const getDisplayFileName = (value?: string) => {
+  if (!value) {
+    return ''
+  }
+
+  const normalized = String(value).replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).pop() || value
+}
+
+const formatStrengthValue = (value?: string | number) => {
+  if (value === undefined || value === null || value === '') {
+    return ''
+  }
+
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? Number(numericValue.toFixed(3)).toString() : String(value)
+}
+
+const hasGenerationInfo = (info?: GalleryGenerationInfo) =>
+  Boolean(info?.model || info?.clip || info?.vae || info?.loras?.length || info?.params)
 
 const countResourceFiles = (nodes: ResourceNode[]): number => {
   return nodes.reduce((total, node) => {
@@ -615,6 +667,19 @@ const readGalleryPromptByDesktopApi = async (path: string) => {
   throw new Error('当前桌面端没有暴露提示词读取接口')
 }
 
+const readGalleryGenerationInfoByDesktopApi = async (path: string) => {
+  if (window.resourceApi?.readGalleryGenerationInfo) {
+    return window.resourceApi.readGalleryGenerationInfo(path)
+  }
+  if (window.localModels?.readGalleryGenerationInfo) {
+    return window.localModels.readGalleryGenerationInfo(path)
+  }
+  if (window.electronAPI?.readGalleryGenerationInfo) {
+    return window.electronAPI.readGalleryGenerationInfo(path)
+  }
+  throw new Error('当前桌面端没有暴露生成信息读取接口')
+}
+
 const readGalleryImageByDesktopApi = async (path: string) => {
   if (window.resourceApi?.readGalleryImage) {
     return window.resourceApi.readGalleryImage(path)
@@ -836,6 +901,22 @@ function App() {
   const isSearching = searchKeyword.trim().length > 0
   const selectedGalleryImage =
     galleryImages.find((image) => image.type === 'file' && image.id === selectedGalleryImageId) || null
+  const selectedGalleryPromptSourceKey = selectedGalleryImage
+    ? [
+        GALLERY_PROMPT_READER_VERSION,
+        selectedGalleryImage.path,
+        selectedGalleryImage.size || 0,
+        selectedGalleryImage.modifiedTimestamp || 0,
+      ].join('|')
+    : ''
+  const selectedGalleryGenerationInfoSourceKey = selectedGalleryImage
+    ? [
+        GALLERY_GENERATION_INFO_READER_VERSION,
+        selectedGalleryImage.path,
+        selectedGalleryImage.size || 0,
+        selectedGalleryImage.modifiedTimestamp || 0,
+      ].join('|')
+    : ''
   const comparedGalleryImages = galleryImages
     .filter((image) => image.type === 'file' && selectedGalleryImageIds.includes(image.id))
     .slice(0, 4)
@@ -862,6 +943,14 @@ function App() {
     nextFiles.sort((first, second) => Number(second.modifiedTimestamp || 0) - Number(first.modifiedTimestamp || 0))
     return [...nextFolders, ...nextFiles]
   }, [galleryImages, gallerySortMode])
+  const visibleGalleryFiles = useMemo(
+    () => visibleGalleryImages.filter((image) => image.type === 'file'),
+    [visibleGalleryImages],
+  )
+  const selectedGalleryImageIndex = selectedGalleryImageId
+    ? visibleGalleryFiles.findIndex((image) => image.id === selectedGalleryImageId)
+    : -1
+  const canNavigateGalleryPreview = visibleGalleryFiles.length > 1 && selectedGalleryImageIndex >= 0
 
   useEffect(() => {
     loadResourcesByDesktopApi()
@@ -961,11 +1050,35 @@ function App() {
   }, [galleryZoom])
 
   useEffect(() => {
+    if (!isGalleryPreviewOpen || !canNavigateGalleryPreview) {
+      return
+    }
+
+    const handlePreviewKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        showAdjacentGalleryImage(-1)
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        showAdjacentGalleryImage(1)
+      }
+    }
+
+    window.addEventListener('keydown', handlePreviewKeyDown)
+    return () => window.removeEventListener('keydown', handlePreviewKeyDown)
+  }, [isGalleryPreviewOpen, canNavigateGalleryPreview, selectedGalleryImageIndex, visibleGalleryFiles])
+
+  useEffect(() => {
     if (!selectedGalleryImage || selectedGalleryImage.type !== 'file') {
       return
     }
 
-    if (typeof selectedGalleryImage.prompt === 'string' && selectedGalleryImage.prompt.length > 0) {
+    if (
+      typeof selectedGalleryImage.prompt === 'string' &&
+      selectedGalleryImage.promptSourceKey === selectedGalleryPromptSourceKey
+    ) {
       return
     }
 
@@ -986,6 +1099,7 @@ function App() {
               ? {
                   ...image,
                   prompt: result.prompt || '',
+                  promptSourceKey: selectedGalleryPromptSourceKey,
                 }
               : image,
           ),
@@ -1001,6 +1115,7 @@ function App() {
               ? {
                   ...image,
                   prompt: '',
+                  promptSourceKey: selectedGalleryPromptSourceKey,
                 }
               : image,
           ),
@@ -1017,7 +1132,63 @@ function App() {
     return () => {
       isCancelled = true
     }
-  }, [selectedGalleryImage?.id, selectedGalleryImage?.path])
+  }, [selectedGalleryImage?.id, selectedGalleryImage?.path, selectedGalleryPromptSourceKey])
+
+  useEffect(() => {
+    if (!selectedGalleryImage || selectedGalleryImage.type !== 'file') {
+      return
+    }
+
+    if (selectedGalleryImage.generationInfoSourceKey === selectedGalleryGenerationInfoSourceKey) {
+      return
+    }
+
+    let isCancelled = false
+
+    const loadGenerationInfo = async () => {
+      try {
+        const result = await readGalleryGenerationInfoByDesktopApi(selectedGalleryImage.path)
+
+        if (isCancelled) {
+          return
+        }
+
+        setGalleryImages((current) =>
+          current.map((image) =>
+            image.id === selectedGalleryImage.id
+              ? {
+                  ...image,
+                  generationInfo: result.generationInfo || { loras: [] },
+                  generationInfoSourceKey: selectedGalleryGenerationInfoSourceKey,
+                }
+              : image,
+          ),
+        )
+      } catch {
+        if (isCancelled) {
+          return
+        }
+
+        setGalleryImages((current) =>
+          current.map((image) =>
+            image.id === selectedGalleryImage.id
+              ? {
+                  ...image,
+                  generationInfo: { loras: [] },
+                  generationInfoSourceKey: selectedGalleryGenerationInfoSourceKey,
+                }
+              : image,
+          ),
+        )
+      }
+    }
+
+    void loadGenerationInfo()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [selectedGalleryImage?.id, selectedGalleryImage?.path, selectedGalleryGenerationInfoSourceKey])
 
   useEffect(() => {
     if (!selectedGalleryImage || selectedGalleryImage.type !== 'file') {
@@ -1589,6 +1760,29 @@ function App() {
     setIsGalleryPreviewOpen(true)
   }
 
+  const resetGalleryPreviewTransform = () => {
+    setGalleryZoom(1)
+    setGalleryPreviewOffset({ x: 0, y: 0 })
+    setIsGalleryPreviewDragging(false)
+  }
+
+  const showAdjacentGalleryImage = (direction: -1 | 1) => {
+    if (!canNavigateGalleryPreview) {
+      return
+    }
+
+    const nextIndex =
+      (selectedGalleryImageIndex + direction + visibleGalleryFiles.length) % visibleGalleryFiles.length
+    const nextImage = visibleGalleryFiles[nextIndex]
+
+    if (!nextImage) {
+      return
+    }
+
+    setSelectedGalleryImageId(nextImage.id)
+    resetGalleryPreviewTransform()
+  }
+
   const copyGalleryImage = async () => {
     if (!selectedGalleryImage) {
       return
@@ -1931,7 +2125,7 @@ function App() {
       <aside className="side-nav">
         <div className="brand">
           <div className="brand-logo">
-            <img src="/brand-logo.png" alt="AI绘画资源管理" />
+            <img src={BRAND_LOGO_URL} alt="AI绘画资源管理" />
           </div>
           <div>
             <strong>AI绘画资源管理</strong>
@@ -2298,6 +2492,80 @@ function App() {
                     </button>
                   </div>
 
+                  <div className="gallery-generation-panel">
+                    <p className="eyebrow">生成信息</p>
+                    {hasGenerationInfo(selectedGalleryImage.generationInfo) ? (
+                      <div className="generation-info-list">
+                        {selectedGalleryImage.generationInfo?.model ? (
+                          <div className="generation-info-item">
+                            <span>模型</span>
+                            <strong>{getDisplayFileName(selectedGalleryImage.generationInfo.model)}</strong>
+                          </div>
+                        ) : null}
+                        {selectedGalleryImage.generationInfo?.loras?.length ? (
+                          <div className="generation-info-item generation-info-loras">
+                            <span>LoRA</span>
+                            <div className="generation-lora-list">
+                              {selectedGalleryImage.generationInfo.loras.map((lora, index) => (
+                                <div className="generation-lora-card" key={`${lora.name}-${index}`}>
+                                  <strong>{getDisplayFileName(lora.name)}</strong>
+                                  <small>
+                                    {[
+                                      lora.strengthModel !== undefined
+                                        ? `模型强度 ${formatStrengthValue(lora.strengthModel)}`
+                                        : '',
+                                      lora.strengthClip !== undefined
+                                        ? `CLIP 强度 ${formatStrengthValue(lora.strengthClip)}`
+                                        : '',
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' · ') || '未读取到强度'}
+                                  </small>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {selectedGalleryImage.generationInfo?.params ? (
+                          <div className="generation-info-item generation-info-params">
+                            <span>参数</span>
+                            <div className="generation-param-grid">
+                              {Object.entries({
+                                Seed: selectedGalleryImage.generationInfo.params.seed,
+                                Steps: selectedGalleryImage.generationInfo.params.steps,
+                                CFG: selectedGalleryImage.generationInfo.params.cfg,
+                                Sampler: selectedGalleryImage.generationInfo.params.sampler,
+                                Scheduler: selectedGalleryImage.generationInfo.params.scheduler,
+                                Denoise: selectedGalleryImage.generationInfo.params.denoise,
+                              })
+                                .filter(([, value]) => value !== undefined && value !== null && value !== '')
+                                .map(([label, value]) => (
+                                  <small key={label}>
+                                    <b>{label}</b>
+                                    {String(value)}
+                                  </small>
+                                ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {selectedGalleryImage.generationInfo?.clip ? (
+                          <div className="generation-info-item">
+                            <span>CLIP</span>
+                            <strong>{getDisplayFileName(selectedGalleryImage.generationInfo.clip)}</strong>
+                          </div>
+                        ) : null}
+                        {selectedGalleryImage.generationInfo?.vae ? (
+                          <div className="generation-info-item">
+                            <span>VAE</span>
+                            <strong>{getDisplayFileName(selectedGalleryImage.generationInfo.vae)}</strong>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="generation-empty">当前图片没有读取到模型或 LoRA 信息。</div>
+                    )}
+                  </div>
+
                   <div className="gallery-prompt-panel">
                     <p className="eyebrow">提示词</p>
                     <pre>
@@ -2568,7 +2836,7 @@ function App() {
                 value={topicName}
                 onChange={(event) => setTopicName(event.target.value)}
                 maxLength={TOPIC_NAME_MAX_LENGTH}
-                placeholder="例如：人像写真"
+                placeholder="例如:文生图、图生图、Z-image"
               />
             </label>
 
@@ -2577,7 +2845,7 @@ function App() {
               <input
                 value={topicDescription}
                 onChange={(event) => setTopicDescription(event.target.value)}
-                placeholder="例如：写真、人像、角色生成"
+                placeholder="例如:动漫、重绘、摄影"
               />
             </label>
 
@@ -2805,6 +3073,32 @@ function App() {
               onMouseUp={() => setIsGalleryPreviewDragging(false)}
               onMouseLeave={() => setIsGalleryPreviewDragging(false)}
             >
+              {canNavigateGalleryPreview ? (
+                <>
+                  <button
+                    type="button"
+                    className="gallery-preview-nav gallery-preview-nav-prev"
+                    aria-label="上一张图片"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      showAdjacentGalleryImage(-1)
+                    }}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    className="gallery-preview-nav gallery-preview-nav-next"
+                    aria-label="下一张图片"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      showAdjacentGalleryImage(1)
+                    }}
+                  >
+                    ›
+                  </button>
+                </>
+              ) : null}
               <div
                 className="gallery-transform-stage"
                 style={{

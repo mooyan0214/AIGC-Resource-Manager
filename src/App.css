@@ -685,6 +685,32 @@ h4 {
   min-height: 0;
 }
 
+.gallery-detail-section {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(108, 132, 199, 0.72) rgba(255, 255, 255, 0.04);
+}
+
+.gallery-detail-section::-webkit-scrollbar {
+  width: 8px;
+}
+
+.gallery-detail-section::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.gallery-detail-section::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(8, 13, 18, 0.98);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #6c84c7, #c5a574);
+}
+
+.gallery-detail-section::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #7b91cf, #d2b388);
+}
+
 .gallery-browser-header {
   display: grid;
   gap: 12px;
@@ -1045,11 +1071,125 @@ h4 {
   cursor: grabbing;
 }
 
+.gallery-preview-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  display: grid;
+  width: 42px;
+  height: 64px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(8, 13, 18, 0.62);
+  color: #f4f0e8;
+  font-size: 42px;
+  line-height: 1;
+  transform: translateY(-50%);
+  cursor: pointer;
+  opacity: 0.72;
+  transition:
+    opacity 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.gallery-preview-nav:hover {
+  border-color: rgba(108, 132, 199, 0.72);
+  background: rgba(12, 18, 28, 0.86);
+  opacity: 1;
+}
+
+.gallery-preview-nav-prev {
+  left: 14px;
+}
+
+.gallery-preview-nav-next {
+  right: 14px;
+}
+
 .gallery-lightbox-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding-top: 20px;
+}
+
+.gallery-generation-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.generation-info-list {
+  display: grid;
+  gap: 8px;
+}
+
+.generation-info-item {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 9px 10px;
+}
+
+.generation-info-item > span {
+  color: var(--accent-pink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.generation-info-item strong {
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.generation-lora-list {
+  display: grid;
+  gap: 8px;
+}
+
+.generation-lora-card {
+  display: grid;
+  gap: 5px;
+}
+
+.generation-lora-card small,
+.generation-param-grid small,
+.generation-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.generation-param-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+}
+
+.generation-param-grid small {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.generation-param-grid b {
+  color: var(--text-main);
+  font-size: 11px;
+}
+
+.generation-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
 }
 
 .gallery-prompt-panel {
@@ -2000,9 +2140,9 @@ html {
 .app-shell.light-mode .brand-logo {
   width: 52px;
   height: 52px;
-  border-radius: 6px;
-  background: #6fa1cf;
-  box-shadow: 0 18px 34px rgba(80, 118, 168, 0.16);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
 }
 
 .app-shell.light-mode .brand strong {

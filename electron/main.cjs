@@ -91,6 +91,291 @@ function isImageFile(filePath) {
   return IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase())
 }
 
+function getLinkedNode(graph, link) {
+  if (!Array.isArray(link)) {
+    return null
+  }
+
+  const linkedId = String(link[0] ?? '')
+  return graph[linkedId] || null
+}
+
+function getLinkedNodeId(link) {
+  if (!Array.isArray(link)) {
+    return ''
+  }
+
+  return String(link[0] ?? '')
+}
+
+function getNodeTextInput(node) {
+  const text = node?.inputs?.text
+  return typeof text === 'string' ? text.trim() : ''
+}
+
+function readLinkedNodeIds(node) {
+  const ids = []
+
+  for (const input of Object.values(node?.inputs || {})) {
+    if (Array.isArray(input)) {
+      const nodeId = getLinkedNodeId(input)
+      if (nodeId) {
+        ids.push(nodeId)
+      }
+    }
+  }
+
+  return ids
+}
+
+function collectUpstreamNodeIds(graph, link, visited = new Set()) {
+  const nodeId = getLinkedNodeId(link)
+
+  if (!nodeId || visited.has(nodeId)) {
+    return visited
+  }
+
+  visited.add(nodeId)
+
+  const node = graph[nodeId]
+  for (const linkedId of readLinkedNodeIds(node)) {
+    collectUpstreamNodeIds(graph, [linkedId, 0], visited)
+  }
+
+  return visited
+}
+
+function getOutputImageLinks(graph) {
+  const links = []
+
+  for (const node of Object.values(graph)) {
+    const classType = String(node?.class_type || '').toLowerCase()
+    const imageLink = node?.inputs?.images
+
+    if (['saveimage', 'previewimage'].includes(classType) && Array.isArray(imageLink)) {
+      links.push(imageLink)
+    }
+  }
+
+  return links
+}
+
+function findTextUpstream(graph, link, visited = new Set()) {
+  const nodeId = getLinkedNodeId(link)
+
+  if (!nodeId || visited.has(nodeId)) {
+    return ''
+  }
+
+  visited.add(nodeId)
+
+  const node = graph[nodeId]
+  const text = getNodeTextInput(node)
+
+  if (text) {
+    return text
+  }
+
+  for (const input of Object.values(node?.inputs || {})) {
+    if (Array.isArray(input)) {
+      const upstreamText = findTextUpstream(graph, input, visited)
+
+      if (upstreamText) {
+        return upstreamText
+      }
+    }
+  }
+
+  return ''
+}
+
+function findSamplerUpstream(graph, link, visited = new Set()) {
+  const nodeId = getLinkedNodeId(link)
+
+  if (!nodeId || visited.has(nodeId)) {
+    return null
+  }
+
+  visited.add(nodeId)
+
+  const node = graph[nodeId]
+  const classType = String(node?.class_type || '').toLowerCase()
+
+  if (classType.includes('ksampler') || classType.includes('samplercustom')) {
+    return node
+  }
+
+  for (const input of Object.values(node?.inputs || {})) {
+    if (Array.isArray(input)) {
+      const sampler = findSamplerUpstream(graph, input, visited)
+
+      if (sampler) {
+        return sampler
+      }
+    }
+  }
+
+  return null
+}
+
+function extractComfyPositivePrompt(graph) {
+  const nodes = Object.values(graph)
+  const outputNode = nodes.find((node) => {
+    const classType = String(node?.class_type || '').toLowerCase()
+    return ['saveimage', 'previewimage'].includes(classType) && Array.isArray(node?.inputs?.images)
+  })
+  const samplerFromOutput = findSamplerUpstream(graph, outputNode?.inputs?.images)
+  const sampler = samplerFromOutput || nodes.find((node) => {
+    const classType = String(node?.class_type || '').toLowerCase()
+    return classType.includes('ksampler') && Array.isArray(node?.inputs?.positive)
+  })
+
+  const positiveText = findTextUpstream(graph, sampler?.inputs?.positive)
+
+  if (positiveText) {
+    return positiveText
+  }
+
+  const clipTextNode = nodes.find((node) => {
+    const classType = String(node?.class_type || '').toLowerCase()
+    return classType.includes('cliptextencode') && getNodeTextInput(node)
+  })
+
+  return getNodeTextInput(clipTextNode)
+}
+
+function extractDirectTextInput(content) {
+  const directTextMatch = content.match(/"inputs"\s*:\s*\{[\s\S]*?"text"\s*:\s*"([\s\S]*?)"\s*(?:,|\})/)
+
+  if (!directTextMatch?.[1]) {
+    return ''
+  }
+
+  try {
+    return JSON.parse(`"${directTextMatch[1]}"`).trim()
+  } catch {
+    return directTextMatch[1].trim()
+  }
+}
+
+async function extractImageMetadata(imagePath) {
+  if (path.extname(imagePath).toLowerCase() !== '.png') {
+    return {}
+  }
+
+  const buffer = await fs.readFile(imagePath)
+  return extractPngTextChunks(buffer).reduce((metadata, entry) => {
+    metadata[entry.keyword] = entry.value
+    return metadata
+  }, {})
+}
+
+function parseMetadataGraph(metadata) {
+  for (const key of ['prompt', 'workflow']) {
+    try {
+      const parsed = JSON.parse(metadata[key] || '')
+
+      if (parsed && typeof parsed === 'object') {
+        return parsed
+      }
+    } catch {
+      // Continue with the next metadata field.
+    }
+  }
+
+  return null
+}
+
+function addUniqueLora(loras, nextLora) {
+  if (!nextLora.name) {
+    return
+  }
+
+  const key = [nextLora.name, nextLora.strengthModel ?? '', nextLora.strengthClip ?? ''].join('|')
+  const hasSameLora = loras.some((lora) => [lora.name, lora.strengthModel ?? '', lora.strengthClip ?? ''].join('|') === key)
+
+  if (!hasSameLora) {
+    loras.push(nextLora)
+  }
+}
+
+function extractGenerationInfoFromGraph(graph) {
+  const outputLinks = getOutputImageLinks(graph)
+  const upstreamIds = new Set()
+
+  if (outputLinks.length > 0) {
+    for (const link of outputLinks) {
+      collectUpstreamNodeIds(graph, link, upstreamIds)
+    }
+  } else {
+    for (const id of Object.keys(graph)) {
+      upstreamIds.add(id)
+    }
+  }
+
+  const info = { loras: [] }
+
+  for (const id of upstreamIds) {
+    const node = graph[id]
+    const classType = String(node?.class_type || '').toLowerCase()
+    const inputs = node?.inputs || {}
+
+    if (!info.model) {
+      info.model =
+        inputs.ckpt_name ||
+        inputs.unet_name ||
+        inputs.model_name ||
+        inputs.checkpoint ||
+        inputs.diffusion_model_name ||
+        info.model
+    }
+
+    if (!info.clip) {
+      info.clip = inputs.clip_name || inputs.text_encoder_name || info.clip
+    }
+
+    if (!info.vae) {
+      info.vae = inputs.vae_name || info.vae
+    }
+
+    if (classType.includes('lora') || inputs.lora_name) {
+      addUniqueLora(info.loras, {
+        name: String(inputs.lora_name || inputs.name || inputs.lora || ''),
+        strengthModel: inputs.strength_model ?? inputs.model_strength ?? inputs.strength,
+        strengthClip: inputs.strength_clip ?? inputs.clip_strength,
+      })
+    }
+
+    if (!info.params && (classType.includes('ksampler') || classType.includes('samplercustom'))) {
+      info.params = {
+        seed: inputs.seed,
+        steps: inputs.steps,
+        cfg: inputs.cfg,
+        sampler: inputs.sampler_name || inputs.sampler,
+        scheduler: inputs.scheduler,
+        denoise: inputs.denoise,
+      }
+    }
+  }
+
+  return info
+}
+
+async function readGenerationInfoFromImage(imagePath) {
+  try {
+    const metadata = await extractImageMetadata(imagePath)
+    const graph = parseMetadataGraph(metadata)
+
+    if (!graph) {
+      return { loras: [] }
+    }
+
+    return extractGenerationInfoFromGraph(graph)
+  } catch {
+    return { loras: [] }
+  }
+}
+
 function normalizePromptText(content) {
   if (!content) {
     return ''
@@ -102,18 +387,15 @@ function normalizePromptText(content) {
     return ''
   }
 
-  const directTextMatch = cleanContent.match(/"inputs"\s*:\s*\{[\s\S]*?"text"\s*:\s*"([\s\S]*?)"\s*(?:,|\})/)
-
-  if (directTextMatch?.[1]) {
-    try {
-      return JSON.parse(`"${directTextMatch[1]}"`).trim()
-    } catch {
-      return directTextMatch[1].trim()
-    }
-  }
-
   try {
     const parsed = JSON.parse(cleanContent)
+    const comfyPositivePrompt =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? extractComfyPositivePrompt(parsed) : ''
+
+    if (comfyPositivePrompt) {
+      return comfyPositivePrompt
+    }
+
     const extractedPrompt =
       parsed?.inputs?.text ||
       parsed?.text ||
@@ -125,8 +407,31 @@ function normalizePromptText(content) {
       return extractedPrompt.trim()
     }
 
+    const nestedPrompt =
+      parsed?.prompt && typeof parsed.prompt === 'object' ? normalizePromptText(JSON.stringify(parsed.prompt)) : ''
+    if (nestedPrompt) {
+      return nestedPrompt
+    }
+
+    const nestedWorkflow =
+      parsed?.workflow && typeof parsed.workflow === 'object' ? normalizePromptText(JSON.stringify(parsed.workflow)) : ''
+    if (nestedWorkflow) {
+      return nestedWorkflow
+    }
+
+    const directText = extractDirectTextInput(cleanContent)
+    if (directText) {
+      return directText
+    }
+
     return ''
   } catch {
+    const directText = extractDirectTextInput(cleanContent)
+
+    if (directText) {
+      return directText
+    }
+
     return cleanContent
       .replace(/```json|```/gi, '')
       .replace(/^\s*"?(inputs|text|prompt)"?\s*:\s*/gim, '')
@@ -527,6 +832,17 @@ function registerGalleryHandlers() {
 
     const prompt = await readPromptFromImage(cleanPath)
     return { prompt }
+  })
+
+  ipcMain.handle('gallery:readGenerationInfo', async (_event, imagePath) => {
+    const cleanPath = String(imagePath || '').trim()
+
+    if (!cleanPath) {
+      throw new Error('图片路径不能为空')
+    }
+
+    const generationInfo = await readGenerationInfoFromImage(cleanPath)
+    return { generationInfo }
   })
 
   ipcMain.handle('gallery:readImage', async (_event, imagePath) => {

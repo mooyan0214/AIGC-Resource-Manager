@@ -16,6 +16,7 @@ const resourceApi = {
   revealGalleryItem: itemPath => ipcRenderer.invoke('gallery:revealItem', itemPath),
   importGalleryImages: payload => ipcRenderer.invoke('gallery:importImages', payload),
   readGalleryPrompt: imagePath => ipcRenderer.invoke('gallery:readPrompt', imagePath),
+  readGalleryGenerationInfo: imagePath => ipcRenderer.invoke('gallery:readGenerationInfo', imagePath),
   readGalleryImage: imagePath => ipcRenderer.invoke('gallery:readImage', imagePath),
   submitFeedback: payload => ipcRenderer.invoke('feedback:submit', payload),
   showConfirmDialog: payload => ipcRenderer.invoke('dialog:confirm', payload),

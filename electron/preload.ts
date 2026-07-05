@@ -19,6 +19,7 @@ const localModelsApi = {
   importGalleryImages: (payload: { targetDirectory?: string; paths?: string[] }) =>
     ipcRenderer.invoke('gallery:importImages', payload),
   readGalleryPrompt: (imagePath: string) => ipcRenderer.invoke('gallery:readPrompt', imagePath),
+  readGalleryGenerationInfo: (imagePath: string) => ipcRenderer.invoke('gallery:readGenerationInfo', imagePath),
   readGalleryImage: (imagePath: string) => ipcRenderer.invoke('gallery:readImage', imagePath),
   submitFeedback: (payload: { content?: string; page?: string }) => ipcRenderer.invoke('feedback:submit', payload),
   showConfirmDialog: (payload: {
